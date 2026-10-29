@@ -16,6 +16,13 @@
 
 ## Changes
 
+- Settings › Processing › Calibration › Matching gains **Allow flat gain
+  and offset mismatch**, off by default. When on, a flat master from other
+  software matches a light whose gain and offset differ, for masters
+  already calibrated against their own flat-darks. Camera, sensor size,
+  filter, binning and readout mode must still match, and darks are
+  unaffected. A rig can turn it on for itself.
+
 - PSF Guard's zstd library is updated for memory-safety advisories in its
   stream and context handling. PSF Guard uses zstd to read and write
   compressed XISF files and saved stacking contexts, and to decompress HTTP

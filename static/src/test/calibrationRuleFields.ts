@@ -103,6 +103,17 @@ export const CALIBRATION_RULE_FIELDS: CalibrationRuleField[] = [
     "default": "prefer"
   },
   {
+    "key": "allow_flat_gain_offset_mismatch",
+    "group": "matching",
+    "label": "Allow flat gain and offset mismatch",
+    "help": "Allow a flat master from other software to match a light even when its gain and offset differ. Use only for a flat master already calibrated against its own flat-darks, so its gain and offset were divided out when it was built. Camera, sensor size, filter, binning and readout mode must still match. Darks are not affected.",
+    "effect": "matching",
+    "kind": {
+      "type": "toggle"
+    },
+    "default": false
+  },
+  {
     "key": "night_zone",
     "group": "matching",
     "label": "Rig's time zone",

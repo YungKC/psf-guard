@@ -2350,7 +2350,7 @@ impl LibrarySnapshot {
             if candidate.is_master && policy == ExternalMasterPolicy::Ignore {
                 continue;
             }
-            let sensor = sensor_matches(light, candidate);
+            let sensor = sensor_matches_with_rules(light, candidate, &rules);
             // A rig that does without darks takes none, and lacks none.
             if candidate.kind == CalibrationKind::Dark && !rules.use_darks {
                 selected.library.unused_dark |= sensor;
@@ -2636,7 +2636,7 @@ impl LibrarySnapshot {
                 !frame.is_master
                     && frame.kept_out.is_none()
                     && validity_admits(frame, light.timestamp)
-                    && sensor_matches(light, frame)
+                    && sensor_matches_with_rules(light, frame, rules)
                     && seiza_calibration::optics_match(
                         &light_signature.seiza,
                         &frame_signature(frame).seiza,
@@ -3097,7 +3097,7 @@ impl LibrarySnapshot {
                 !frame.is_master
                     && frame.kept_out.is_none()
                     && validity_admits(frame, light.timestamp)
-                    && sensor_matches(light, frame)
+                    && sensor_matches_with_rules(light, frame, rules)
                     && seiza_calibration::optics_match(
                         &light_signature.seiza,
                         &frame_signature(frame).seiza,
@@ -3775,7 +3775,7 @@ fn refusal(
             _ => "marked for lights before it".to_string(),
         };
     }
-    if !sensor_matches(light, candidate) {
+    if !sensor_matches_with_rules(light, candidate, rules) {
         return seiza_calibration::describe_sensor_mismatch(light_seiza, frame_seiza);
     }
     match candidate.kind {
@@ -4366,7 +4366,7 @@ fn flat_near_miss_in(
         if (candidate.is_master && policy == ExternalMasterPolicy::Ignore)
             || candidate.kept_out.is_some()
             || !validity_admits(candidate, light.timestamp)
-            || !sensor_matches(light, candidate)
+            || !sensor_matches_with_rules(light, candidate, rules)
         {
             continue;
         }
@@ -8809,6 +8809,35 @@ fn sensor_matches(light: &FrameMeta, candidate: &CalibrationFrame) -> bool {
     }
 }
 
+/// [`sensor_matches`] under a light's rules. When
+/// `allow_flat_gain_offset_mismatch` is on, a flat master from other
+/// software matches a light whose gain and offset differ: a normalized
+/// flat already calibrated against its own flat-darks divides its gain
+/// and offset out, so they cannot say whether its optics still correct
+/// the light. Every other sensor field still has to agree — camera,
+/// sensor size, binning, readout mode — and the setting never applies to
+/// raw flats, darks, or bias frames, whose gain and offset are part of
+/// what they subtract.
+fn sensor_matches_with_rules(
+    light: &FrameMeta,
+    candidate: &CalibrationFrame,
+    rules: &Rules,
+) -> bool {
+    if candidate.is_master
+        && candidate.kind == CalibrationKind::Flat
+        && rules.allow_flat_gain_offset_mismatch
+    {
+        let mut light_signature = light_signature(light);
+        let mut candidate_signature = frame_signature(candidate);
+        light_signature.seiza.gain = None;
+        light_signature.seiza.offset = None;
+        candidate_signature.seiza.gain = None;
+        candidate_signature.seiza.offset = None;
+        return signature_sensor_consistent(&light_signature, &candidate_signature);
+    }
+    sensor_matches(light, candidate)
+}
+
 fn flat_matches(light: &FrameMeta, candidate: &CalibrationFrame, rules: &Rules) -> bool {
     let (light, candidate_signature) = (light_signature(light), frame_signature(candidate));
     let tolerances = rules.tolerances();
@@ -10446,6 +10475,86 @@ pub(crate) mod tests {
             ..master.clone()
         };
         assert!(!sensor_matches(&light, &other));
+    }
+
+    #[test]
+    fn a_flat_master_may_match_across_gain_and_offset_when_allowed() {
+        // Kai's Ha case: the light is gain 100 / offset 20, the Seiza
+        // flat master is gain 0 / offset 0, same camera, sensor and
+        // filter, already calibrated against its own flat-darks.
+        let light = frame("/light.fits", "LIGHT");
+        let flat_master = CalibrationFrame {
+            id: 1,
+            frame_uuid: "f".into(),
+            rig_uuid: "r".into(),
+            kind: CalibrationKind::Flat,
+            source_path: "/masterFlat.fits".into(),
+            source_fingerprint: "x".into(),
+            captured_at: None,
+            telescope: Some("Scope".into()),
+            camera: Some("Camera".into()),
+            width: Some(3000),
+            height: Some(2000),
+            channels: Some(1),
+            binning_x: Some(1),
+            binning_y: Some(1),
+            gain: Some(0),
+            offset: Some(0),
+            readout_mode: None,
+            readout_mode_name: None,
+            is_master: true,
+            bayer_pattern: None,
+            exposure_s: Some(3.9),
+            camera_temp: Some(18.0),
+            filter: Some("Ha".into()),
+            focal_length_mm: None,
+            rotation: None,
+            valid_direction: None,
+            kept_out: None,
+            source_verified: false,
+        };
+        let allowed = RuleBook::new(
+            [(
+                "allow_flat_gain_offset_mismatch".to_string(),
+                serde_json::json!(true),
+            )]
+            .into_iter()
+            .collect(),
+            Default::default(),
+        )
+        .global();
+        assert!(allowed.allow_flat_gain_offset_mismatch);
+        assert!(allowed.tolerances().allow_flat_gain_offset_mismatch);
+        assert!(allowed.matching_digest().is_some());
+
+        // Off by default, as before.
+        assert!(!sensor_matches(&light, &flat_master));
+        assert!(!sensor_matches_with_rules(
+            &light,
+            &flat_master,
+            rules::defaults()
+        ));
+
+        // On, the flat master matches.
+        assert!(sensor_matches_with_rules(&light, &flat_master, &allowed));
+
+        // The setting never widens a raw flat, a dark master, or a
+        // flat master from another camera.
+        let raw = CalibrationFrame {
+            is_master: false,
+            ..flat_master.clone()
+        };
+        assert!(!sensor_matches_with_rules(&light, &raw, &allowed));
+        let dark_master = CalibrationFrame {
+            kind: CalibrationKind::Dark,
+            ..flat_master.clone()
+        };
+        assert!(!sensor_matches_with_rules(&light, &dark_master, &allowed));
+        let other_camera = CalibrationFrame {
+            camera: Some("Other".into()),
+            ..flat_master.clone()
+        };
+        assert!(!sensor_matches_with_rules(&light, &other_camera, &allowed));
     }
 
     #[test]

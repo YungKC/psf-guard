@@ -385,6 +385,17 @@ calibration, and the source file needs no header edits.
 how they take part: use one whenever it matches (the default), only when raw
 frames cannot build a master, or never. A rig can choose for itself.
 
+**Settings › Processing › Calibration › Matching › Allow flat gain and
+offset mismatch** (off by default) lets a flat master from other software
+match a light whose gain and offset differ. Use it only for a flat master
+already calibrated against its own flat-darks, so its gain and offset were
+divided out when it was built: a normalized flat corrects dust and
+vignetting regardless of the readout settings it was shot at, while the
+light's own dark, which must still match gain, offset, exposure and
+temperature, handles the additive side. Camera, sensor size, filter,
+binning and readout mode must still match, and the setting never applies
+to raw flats, darks, or bias frames.
+
 ## Files that move
 
 Capture software drops calibration frames where it likes; a filer or a hand
@@ -1752,6 +1763,7 @@ ASI2600MM)`. An editor can open the rig's settings from there.
 | `flat_session_hours` | Flat session: how far apart one master's flats may be | 24 h | 1–720 | matching |
 | `use_darks` | Use darks | on | on, off | matching |
 | `external_masters` | External masters | use whenever one matches | prefer, fallback, ignore | matching |
+| `allow_flat_gain_offset_mismatch` | Allow flat gain and offset mismatch | off | on, off | matching |
 | `night_zone` | Rig's time zone: where a rig's nights split ([Nights](#nights)) | automatic | `auto`, or a UTC offset in hours from `-12` to `14` (`-9.5`, `5.75` and the other half and quarter hours zones keep) | frame grades and flat measuring |
 | `light_nights` | Nights end: where Images, Sequence and the calibration reports split a rig's lights ([Dates are nights](SCREENING.md#dates-are-nights)) | `rig` | `rig` (At each rig's noon, as above) or `catalog` (Same time for all rigs: the catalog's daytime gap when nothing is shot); a view can show the other from its View panel | the light checks, on their kept headers |
 | `dark_reach_days` | Maximum time difference for darks | 183 days | 1–3650 | matching |

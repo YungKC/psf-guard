@@ -569,6 +569,15 @@ static FIELDS: LazyLock<Vec<FieldSpec>> = LazyLock::new(|| {
             default: json!("prefer"),
         },
         FieldSpec {
+            key: "allow_flat_gain_offset_mismatch",
+            group: Group::Matching,
+            label: "Allow flat gain and offset mismatch",
+            help: "Allow a flat master from other software to match a light even when its gain and offset differ. Use only for a flat master already calibrated against its own flat-darks, so its gain and offset were divided out when it was built. Camera, sensor size, filter, binning and readout mode must still match. Darks are not affected.",
+            effect: Effect::Matching,
+            kind: FieldKind::Toggle,
+            default: json!(false),
+        },
+        FieldSpec {
             key: "night_zone",
             group: Group::Matching,
             label: "Rig's time zone",
@@ -1142,6 +1151,11 @@ pub struct Rules {
     pub flat_session_seconds: u64,
     pub use_darks: bool,
     pub external_masters: ExternalMasterPolicy,
+    /// A flat master from other software may match a light whose gain and
+    /// offset differ, when this is on. See the setting's help text: it is
+    /// only sound for a master already calibrated against its own
+    /// flat-darks.
+    pub allow_flat_gain_offset_mismatch: bool,
     pub dark_reach_days: f64,
     pub complete_dark_frames: usize,
     pub dark_choice: DarkChoice,
@@ -1251,6 +1265,9 @@ impl Rules {
                 .as_str()
                 .and_then(ExternalMasterPolicy::parse)
                 .unwrap_or_default(),
+            allow_flat_gain_offset_mismatch: value("allow_flat_gain_offset_mismatch")
+                .as_bool()
+                .unwrap_or(false),
             dark_reach_days: number("dark_reach_days"),
             complete_dark_frames: count("complete_dark_frames").max(super::MIN_MASTER_FRAMES),
             dark_choice: match value("dark_choice").as_str() {
@@ -1342,6 +1359,7 @@ impl Rules {
             focal_length_mm: self.focal_length_mm,
             dark_temperature_c: self.dark_temperature_c,
             flat_session_seconds: self.flat_session_seconds,
+            allow_flat_gain_offset_mismatch: self.allow_flat_gain_offset_mismatch,
             ..MatchTolerances::default()
         }
     }
@@ -1641,6 +1659,8 @@ mod tests {
         assert_eq!(rules.coherence_tolerances().rotation_deg, 2.0);
         assert!(rules.use_darks);
         assert_eq!(rules.external_masters, ExternalMasterPolicy::Prefer);
+        assert!(!rules.allow_flat_gain_offset_mismatch);
+        assert!(!rules.tolerances().allow_flat_gain_offset_mismatch);
         assert_eq!(rules.dark_reach_days, 183.0);
         assert_eq!(rules.complete_dark_frames, 10);
         assert_eq!(rules.dark_choice, DarkChoice::Complete);
