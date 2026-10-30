@@ -442,37 +442,45 @@ pub(crate) fn mosaic_target_details(
         // Best-effort, header-only rig and field of view from the first
         // light of this target. A failure here lists the target without
         // rig detail rather than failing the picker.
-        let (telescope, camera, width_px, height_px, fov_width, fov_height) =
-            first_light_rig(conn, target_id);
+        let rig = first_light_rig(conn, target_id);
         details.push(MosaicTargetDetail {
             target_id,
             name,
             ra_hours,
             dec_degrees,
             filters,
-            telescope,
-            camera,
-            width_px,
-            height_px,
-            fov_width_degrees: fov_width,
-            fov_height_degrees: fov_height,
+            telescope: rig.telescope,
+            camera: rig.camera,
+            width_px: rig.width_px,
+            height_px: rig.height_px,
+            fov_width_degrees: rig.fov_width_degrees,
+            fov_height_degrees: rig.fov_height_degrees,
         });
     }
     Ok(details)
 }
 
-fn first_light_rig(
-    conn: &Connection,
-    target_id: i32,
-) -> (
-    Option<String>,
-    Option<String>,
-    Option<i64>,
-    Option<i64>,
-    Option<f64>,
-    Option<f64>,
-) {
-    let none = (None, None, None, None, None, None);
+/// Rig and field of view read from one target's first light, header-only.
+/// Every field is optional: an unreadable first frame still lists the
+/// target, just without rig detail.
+struct FirstLightRig {
+    telescope: Option<String>,
+    camera: Option<String>,
+    width_px: Option<i64>,
+    height_px: Option<i64>,
+    fov_width_degrees: Option<f64>,
+    fov_height_degrees: Option<f64>,
+}
+
+fn first_light_rig(conn: &Connection, target_id: i32) -> FirstLightRig {
+    let none = FirstLightRig {
+        telescope: None,
+        camera: None,
+        width_px: None,
+        height_px: None,
+        fov_width_degrees: None,
+        fov_height_degrees: None,
+    };
     let path: Option<String> = conn
         .query_row(
             "SELECT json_extract(metadata, '$.FileName') FROM acquiredimage
@@ -521,14 +529,14 @@ fn first_light_rig(
         }
         _ => (None, None),
     };
-    (
-        get("TELESCOP"),
-        get("INSTRUME"),
-        width,
-        height,
-        fov_width,
-        fov_height,
-    )
+    FirstLightRig {
+        telescope: get("TELESCOP"),
+        camera: get("INSTRUME"),
+        width_px: width,
+        height_px: height,
+        fov_width_degrees: fov_width,
+        fov_height_degrees: fov_height,
+    }
 }
 
 #[derive(Debug, Deserialize, Default)]
