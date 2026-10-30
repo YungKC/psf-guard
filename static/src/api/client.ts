@@ -16,6 +16,8 @@ import type { DirectorAdoptionPlan, DirectorAdoptionReport, DirectorCollection, 
   DirectorSkyMarksQuery, DirectorActivation, DirectorActivationPushReport, DirectorActivationReport, DirectorPlanDraft, DirectorPlanList, DirectorPlanView, DirectorRigStatusView, DirectorRigProfileSummary, DirectorTemplateList, DirectorStatus, DirectorRigPlan, DirectorRigProfileEdit, DirectorRigProfileView, DirectorRigReport, DirectorSurvey, DirectorNameSearch, DirectorLibraryTemplate, DirectorAttached, DirectorTakenValues, DirectorRigScheduling, DirectorPlanProgress, DirectorPlanDeletion, DirectorPlanDeletionOutcome, DirectorCollaborationLeave, DirectorCollaborationLeft } from './directorTypes';
 import type { GuidFillReport, GuidReport,
   ProjectMosaic,
+  UserMosaic,
+  MosaicTargetDetail,
   ProjectProcessingSettings,
   StackColorInputSources,
   FlatHistoryState,
@@ -335,6 +337,8 @@ export type StackPreviewStartRequest = {
   /** Reproject onto the shared north-up, east-left grid. Off by default. */
   north_up?: boolean;
   mosaic?: boolean;
+  /** A user-defined mosaic to build, by id; omitted uses the default mosaic. */
+  mosaic_id?: number;
   /**
    * Integration order. `capture` (default) is chronological; `quality`
    * puts the best-graded frames first, which makes the progressive
@@ -2544,12 +2548,55 @@ export const apiClient = {
   },
 
   /** The project's mosaic panels, or `null` when it is not a mosaic. */
-  getProjectMosaic: async (dbId: string, projectId: number): Promise<ProjectMosaic | null> => {
+  getProjectMosaic: async (dbId: string, projectId: number, mosaicId?: number): Promise<ProjectMosaic | null> => {
     const apiInstance = await getApi();
+    const query = mosaicId === undefined ? '' : `?mosaic_id=${mosaicId}`;
     const { data } = await apiInstance.get<ApiResponse<{ mosaic: ProjectMosaic | null }>>(
-      dbPath(dbId, `/projects/${projectId}/mosaic`)
+      dbPath(dbId, `/projects/${projectId}/mosaic${query}`)
     );
     return data.data?.mosaic ?? null;
+  },
+
+  /** The project's user-defined mosaics, in creation order. */
+  getUserMosaics: async (dbId: string, projectId: number): Promise<UserMosaic[]> => {
+    const apiInstance = await getApi();
+    const { data } = await apiInstance.get<ApiResponse<UserMosaic[]>>(
+      dbPath(dbId, `/projects/${projectId}/mosaics`)
+    );
+    return data.data || [];
+  },
+
+  /** Create a user mosaic from picked targets. Rows and columns are
+   *  one-based and optional; the server places a panel from its
+   *  target's coordinates when either is missing. */
+  createUserMosaic: async (
+    dbId: string,
+    projectId: number,
+    request: { name: string; panels: Array<{ target_id: number; row?: number; column?: number }> }
+  ): Promise<UserMosaic> => {
+    const apiInstance = await getApi();
+    const { data } = await apiInstance.post<ApiResponse<UserMosaic>>(
+      dbPath(dbId, `/projects/${projectId}/mosaics`),
+      request
+    );
+    if (!data.data) throw new Error(data.error || 'Failed to create mosaic');
+    return data.data;
+  },
+
+  /** Delete one user mosaic. Frames, targets, grades, and calibration
+   *  are untouched; only the mosaic and its panel rows are deleted. */
+  deleteUserMosaic: async (dbId: string, projectId: number, mosaicId: number): Promise<void> => {
+    const apiInstance = await getApi();
+    await apiInstance.delete(dbPath(dbId, `/projects/${projectId}/mosaics/${mosaicId}`));
+  },
+
+  /** The detail a mosaic picker lists per target of a project. */
+  getMosaicTargets: async (dbId: string, projectId: number): Promise<MosaicTargetDetail[]> => {
+    const apiInstance = await getApi();
+    const { data } = await apiInstance.get<ApiResponse<MosaicTargetDetail[]>>(
+      dbPath(dbId, `/projects/${projectId}/mosaic-targets`)
+    );
+    return data.data || [];
   },
 
   getTargetNavigation: async (dbId: string): Promise<TargetNavigation[]> => {

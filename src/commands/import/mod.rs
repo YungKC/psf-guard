@@ -1745,6 +1745,36 @@ fn insert_project(
     Ok(project_id)
 }
 
+/// The name a new target gets in a project: its planned name when
+/// that name is free in the project, otherwise the first free
+/// `name (n)` with `n >= 2`, following PSF Guard's own project-name
+/// disambiguation. This is the import side of the fork's manual-mosaic
+/// target rule: a second rig's view of one object name gets an index,
+/// not a renamed object and not a merged target. Comparison is
+/// case-insensitive and trims surrounding spaces; existing targets
+/// are never renamed, so an index is assigned once and never
+/// renumbered.
+fn disambiguated_target_name(conn: &Connection, project_id: i64, base: &str) -> Result<String> {
+    let base_trimmed = base.trim();
+    let mut statement = conn.prepare("SELECT name FROM target WHERE projectid = ?")?;
+    let rows = statement.query_map([project_id], |row| row.get::<_, String>(0))?;
+    let mut taken = std::collections::HashSet::new();
+    for row in rows {
+        taken.insert(row?.trim().to_lowercase());
+    }
+    if !taken.contains(&base_trimmed.to_lowercase()) {
+        return Ok(base.to_owned());
+    }
+    let mut index = 2;
+    loop {
+        let candidate = format!("{} ({})", base_trimmed, index);
+        if !taken.contains(&candidate.to_lowercase()) {
+            return Ok(candidate);
+        }
+        index += 1;
+    }
+}
+
 fn insert_target(
     conn: &Connection,
     target: &grouping::PlannedTarget,
@@ -1752,11 +1782,12 @@ fn insert_target(
 ) -> Result<i64> {
     // Constructor defaults: active, epoch J2000 (N.I.N.A. enum value 2),
     // rotation 0, ROI 100%. RA is stored in decimal HOURS (TS convention).
+    let name = disambiguated_target_name(conn, project_id, &target.name)?;
     conn.execute(
         "INSERT INTO target (name, active, ra, dec, epochcode, rotation, roi, projectid, guid)
          VALUES (?1, 1, ?2, ?3, 2, 0, 100, ?4, ?5)",
         params![
-            target.name,
+            name,
             target.ra_hours.unwrap_or(0.0),
             target.dec_deg.unwrap_or(0.0),
             project_id,
@@ -2140,6 +2171,44 @@ mod tests {
             object: None,
             ..light("panel", filter, ts)
         }
+    }
+
+    #[test]
+    fn a_duplicate_target_name_in_one_project_gets_an_index_never_a_rename() {
+        let conn = fresh_conn();
+        conn.execute(
+            "INSERT INTO project (Id, profileId, name, state, guid) VALUES (1, 'p', 'P', 1, 'pg')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO target (name, active, ra, dec, epochcode, rotation, roi, projectid, guid)
+             VALUES ('M81', 1, 9.9, 69.0, 2, 0, 100, 1, 'tg1')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            disambiguated_target_name(&conn, 1, "M81").unwrap(),
+            "M81 (2)"
+        );
+        conn.execute(
+            "INSERT INTO target (name, active, ra, dec, epochcode, rotation, roi, projectid, guid)
+             VALUES ('M81 (2)', 1, 9.9, 69.0, 2, 0, 100, 1, 'tg2')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            disambiguated_target_name(&conn, 1, " m81 ").unwrap(),
+            "m81 (3)"
+        );
+        let names: Vec<String> = conn
+            .prepare("SELECT name FROM target WHERE projectid = 1 ORDER BY Id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(names, vec!["M81", "M81 (2)"]);
     }
 
     #[test]

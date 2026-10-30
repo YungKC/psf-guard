@@ -1032,6 +1032,7 @@ fn stack_quality_prefers_comparable_target_filter_scores() {
 fn request_requires_unique_pair_or_more() {
     assert!(validate_request(&StackPreviewRequest {
         mosaic: false,
+        mosaic_id: None,
         image_ids: vec![1],
         accepted_only: false,
         force: false,
@@ -1047,6 +1048,7 @@ fn request_requires_unique_pair_or_more() {
     .is_err());
     assert!(validate_request(&StackPreviewRequest {
         mosaic: false,
+        mosaic_id: None,
         image_ids: vec![1, 1],
         accepted_only: false,
         force: false,
@@ -1062,6 +1064,7 @@ fn request_requires_unique_pair_or_more() {
     .is_err());
     assert!(validate_request(&StackPreviewRequest {
         mosaic: false,
+        mosaic_id: None,
         image_ids: vec![1, 2],
         accepted_only: false,
         force: false,
@@ -1082,6 +1085,7 @@ fn a_channel_override_wins_over_the_request_mode() {
     use crate::calibration::CalibrationMode;
     let mut request = StackPreviewRequest {
         mosaic: false,
+        mosaic_id: None,
         image_ids: vec![1, 2],
         accepted_only: false,
         force: false,

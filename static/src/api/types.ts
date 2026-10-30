@@ -4134,13 +4134,39 @@ export interface MosaicPanel {
   preview?: SkyPreview | null;
 }
 
+/** A user-defined mosaic: a named selection of targets in one project. */
+export interface UserMosaic {
+  id: number;
+  project_id: number;
+  name: string;
+  source: 'user';
+  rows: number;
+  columns: number;
+  panels: MosaicPanel[];
+}
+
+/** One target, with the detail a mosaic picker lists for it. */
+export interface MosaicTargetDetail {
+  target_id: number;
+  name: string;
+  ra_hours: number | null;
+  dec_degrees: number | null;
+  filters: Array<{ filter_name: string; frames: number; accepted: number }>;
+  telescope: string | null;
+  camera: string | null;
+  width_px: number | null;
+  height_px: number | null;
+  fov_width_degrees: number | null;
+  fov_height_degrees: number | null;
+}
+
 /** A project's targets as one mosaic. `director` when Director's
  *  activation record names the panels, `inferred` when the targets'
  *  coordinates form the grid. */
 export interface ProjectMosaic {
   project_id: number;
   name: string;
-  source: 'director' | 'inferred';
+  source: 'director' | 'inferred' | 'user';
   rows: number;
   columns: number;
   /** Row by row from the top, left to right. */

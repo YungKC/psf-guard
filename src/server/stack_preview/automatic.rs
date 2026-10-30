@@ -1179,6 +1179,7 @@ fn plan_refresh_mode(
     let mut request =
         refresh_request(&latest, &[], &scoring).unwrap_or_else(|| StackPreviewRequest {
             mosaic: false,
+            mosaic_id: None,
             image_ids: Vec::new(),
             accepted_only: false,
             force: false,
@@ -1331,6 +1332,7 @@ pub(super) fn refresh_request(
         .is_some_and(|orientation| orientation.convention == seiza_stacking::SKY_ORIENTATION_NAME);
     Some(StackPreviewRequest {
         mosaic: newest.group.target_id < 0,
+        mosaic_id: None,
         image_ids,
         accepted_only: newest.accepted_only,
         force: false,

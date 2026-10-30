@@ -344,6 +344,21 @@ mod tests {
     }
 
     #[test]
+    fn a_panel_with_no_eligible_frames_fails_cleanly_before_any_integration() {
+        // A user mosaic may list a panel whose frames are all
+        // rejected or pending: planning must report that panel by
+        // id and stop, not integrate a partial canvas.
+        let mut group = group(vec![
+            frame("a.fits".into(), 1, 1),
+            frame("b.fits".into(), 2, 2),
+        ]);
+        group.mosaic_panels = vec![1, 2, 3];
+        let error = super::panel_references(&group, false).unwrap_err();
+        assert!(error.contains("[3]"), "{error}");
+        assert!(error.contains("no eligible frames"), "{error}");
+    }
+
+    #[test]
     fn mosaic_planning_checks_memory_missing_panels_and_unsupported_modes() {
         let scratch = tempfile::tempdir().unwrap();
         let plan = crate::calibration::CalibrationPlan::without_calibration(2);

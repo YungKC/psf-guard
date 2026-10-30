@@ -1079,11 +1079,20 @@ pub(super) fn prepare_whole(
         let exposure_groups =
             crate::server::exposure_groups::cached_groups(ctx, &conn, project_id, request.mosaic)?;
         let mosaic = if request.mosaic {
-            Some(
-                crate::server::mosaic_scope::project_mosaic(&conn, project_id)?.ok_or_else(
-                    || AppError::BadRequest("This project has no mosaic panels".into()),
-                )?,
-            )
+            Some(match request.mosaic_id {
+                Some(mosaic_id) => {
+                    crate::server::mosaic_scope::project_mosaic_named(&conn, project_id, mosaic_id)?
+                        .ok_or_else(|| {
+                            AppError::BadRequest(format!(
+                                "Mosaic {mosaic_id} is not a mosaic of project {project_id}"
+                            ))
+                        })?
+                }
+                None => crate::server::mosaic_scope::project_mosaic(&conn, project_id)?
+                    .ok_or_else(|| {
+                        AppError::BadRequest("This project has no mosaic panels".into())
+                    })?,
+            })
         } else {
             None
         };
@@ -1248,6 +1257,14 @@ pub(super) fn prepare_whole(
     // Each group's own identity starts from the same settings.
     if let Some(mosaic) = &mosaic {
         hasher.update(b"\0expanded-mosaic-v1\0");
+        // A named user mosaic is its own job even when its panels match
+        // another mosaic's, so a later name change or panel edit does
+        // not silently reuse the other mosaic's artifact. Default
+        // mosaics keep their existing ids.
+        if let Some(mosaic_id) = request.mosaic_id {
+            hasher.update(b"\0user-mosaic\0");
+            hasher.update(mosaic_id.to_le_bytes());
+        }
         let mut panels = mosaic
             .panels
             .iter()

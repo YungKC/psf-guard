@@ -405,6 +405,18 @@ pub fn api_router(state: Arc<AppState>) -> Router {
             get(mosaic_scope::get_project_mosaic),
         )
         .route(
+            "/projects/{project_id}/mosaics",
+            get(mosaic_scope::list_project_mosaics).post(mosaic_scope::create_project_mosaic),
+        )
+        .route(
+            "/projects/{project_id}/mosaics/{mosaic_id}",
+            axum::routing::delete(mosaic_scope::delete_project_mosaic),
+        )
+        .route(
+            "/projects/{project_id}/mosaic-targets",
+            get(mosaic_scope::list_mosaic_targets),
+        )
+        .route(
             "/projects/{project_id}/stack-previews",
             post(stack_preview::start_stack_previews),
         )

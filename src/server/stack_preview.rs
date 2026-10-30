@@ -218,6 +218,12 @@ pub struct StackPreviewRequest {
     /// Integrate the project’s panels on one expanded Seiza canvas per channel.
     #[serde(default)]
     pub mosaic: bool,
+    /// A user-defined mosaic to integrate, by its `psf_guard_mosaic` id.
+    /// When set with `mosaic`, the build uses that mosaic's panels
+    /// instead of the project's default mosaic. Omitted keeps the
+    /// default mosaic, so older requests are unchanged.
+    #[serde(default)]
+    pub mosaic_id: Option<i64>,
     #[serde(default)]
     pub accepted_only: bool,
     #[serde(default)]

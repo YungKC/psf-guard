@@ -576,19 +576,30 @@ fn plan_organization(
                 _ => return Err(invalid("choose an existing project or a new project name")),
             }
             if let Some(project_id) = preview.destination_project_id {
-                let clash: bool = conn.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM target WHERE projectid = ? AND Id <> ? AND lower(trim(name)) = lower(trim(?)))",
-                    params![project_id, source.id, source.name], |row| row.get(0),
-                ).map_err(AppError::db)?;
-                if clash {
-                    return Err(invalid(format!(
-                        "{} already has a target named {}. To combine the two targets, use Merge target instead.",
-                        preview.destination_project_name, source.name.trim()
-                    )));
+                // Fork (manual mosaic): a target moving into a project
+                // that already holds a target of the same object name
+                // is not refused, and the two targets are not merged.
+                // The moved target keeps its object name as its base
+                // and gets the next disambiguation index, so the
+                // project can hold both rigs' views of one field.
+                // The suffixed name is catalog-only: no file header
+                // changes, and the suffix is assigned once, never
+                // renumbered when another target leaves.
+                let disambiguated =
+                    disambiguated_target_name(conn, project_id, source.id, &source.name)?;
+                if disambiguated != source.name {
+                    preview.warnings.push(format!(
+                        "{} already has a target named {}. The moved target will be named {} there; its object name in files is unchanged. To combine the two targets instead, use Merge target.",
+                        preview.destination_project_name,
+                        source.name.trim(),
+                        disambiguated
+                    ));
                 }
+                preview.destination_target_name = disambiguated;
+            } else {
+                preview.destination_target_name = source.name.clone();
             }
             preview.destination_target_id = Some(source.id);
-            preview.destination_target_name = source.name.clone();
             None
         }
     };
@@ -734,6 +745,46 @@ struct TargetMovePlan {
 
 fn plural(count: usize, one: &str, many: &str) -> String {
     format!("{count} {}", if count == 1 { one } else { many })
+}
+
+/// The name a target gets in a project that may already hold a target
+/// of the same name: the base name when it is free, otherwise the
+/// first free `base (n)` with `n >= 2`, following PSF Guard's own
+/// project-name disambiguation. Comparison is case-insensitive and
+/// trims surrounding spaces, matching the name-clash checks elsewhere
+/// in this file. Existing targets are never renamed by this: the
+/// suffix is assigned once, at the move or import that creates the
+/// second entry, and stays even if the first entry later leaves.
+fn disambiguated_target_name(
+    conn: &Connection,
+    project_id: i32,
+    exclude_target_id: i32,
+    base: &str,
+) -> Result<String, AppError> {
+    let base_trimmed = base.trim();
+    let mut statement = conn
+        .prepare("SELECT name FROM target WHERE projectid = ? AND Id <> ?")
+        .map_err(AppError::db)?;
+    let rows = statement
+        .query_map(params![project_id, exclude_target_id], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(AppError::db)?;
+    let mut taken: HashSet<String> = HashSet::new();
+    for row in rows {
+        taken.insert(row.map_err(AppError::db)?.trim().to_lowercase());
+    }
+    if !taken.contains(&base_trimmed.to_lowercase()) {
+        return Ok(base.to_owned());
+    }
+    let mut index = 2;
+    loop {
+        let candidate = format!("{} ({})", base_trimmed, index);
+        if !taken.contains(&candidate.to_lowercase()) {
+            return Ok(candidate);
+        }
+        index += 1;
+    }
 }
 
 /// Check a target move and describe it in `preview`: the profile rule, the
@@ -1099,6 +1150,10 @@ fn fingerprint(
             .map_err(|error| AppError::InternalError(error.to_string()))?,
     );
     digest.update(extra);
+    // A disambiguated target name is part of what the preview promises:
+    // if another target of the same name arrives between preview and
+    // apply, the preview must be taken again.
+    digest.update(preview.destination_target_name.as_bytes());
     let destination_target = preview.destination_target_id.unwrap_or(source.id);
     let destination_project = preview.destination_project_id.unwrap_or(source.project_id);
     for (table, parent, ids) in [
@@ -1504,9 +1559,12 @@ fn move_target(
     project_id: i32,
 ) -> Result<(), AppError> {
     let target_id = plan.source.id;
+    // The preview's destination name is the moved target's name after
+    // the move: its plain name, or the disambiguated `name (n)` when
+    // the destination already held a target of that name.
     conn.execute(
-        "UPDATE target SET projectid = ? WHERE Id = ?",
-        params![project_id, target_id],
+        "UPDATE target SET projectid = ?, name = ? WHERE Id = ?",
+        params![project_id, plan.preview.destination_target_name, target_id],
     )
     .map_err(AppError::db)?;
     conn.execute(
@@ -2409,14 +2467,60 @@ mod tests {
     }
 
     #[test]
-    fn a_name_clash_or_unclear_destination_is_refused() {
-        let conn = catalog();
+    fn a_name_clash_gets_a_disambiguation_index_not_a_refusal() {
+        // Fork (manual mosaic): moving into a project that already
+        // holds a target of the same object name no longer refuses
+        // the move or merges the targets. The moved target keeps its
+        // object name as its base and takes the next index, so the
+        // project can hold both rigs' views of one field.
+        let mut conn = catalog();
         conn.execute("UPDATE target SET name = ' m81 ' WHERE Id = 1", [])
             .unwrap();
-        let message = bad_request(plan_organization(&conn, &move_target(1, Some(2), None)));
-        assert!(message.contains("Merge target"), "{message}");
-        assert!(message.contains("Destination project"), "{message}");
-        bad_request(plan_organization(&conn, &move_target(1, Some(1), None)));
+        let preview = plan_organization(&conn, &move_target(1, Some(2), None))
+            .unwrap()
+            .preview;
+        assert_eq!(preview.destination_target_name, "m81 (2)");
+        assert!(
+            preview
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("m81 (2)")),
+            "{:?}",
+            preview.warnings
+        );
+        let result = apply_organization(
+            &mut conn,
+            &OrganizationApplyRequest {
+                operation: move_target(1, Some(2), None),
+                expected_fingerprint: preview.fingerprint.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(result.project_id, 2);
+        assert_eq!(
+            one::<String>(&conn, "SELECT name FROM target WHERE Id = 1"),
+            "m81 (2)",
+            "the moved target is renamed in the catalog only"
+        );
+        assert_eq!(
+            one::<String>(&conn, "SELECT name FROM target WHERE Id = 3"),
+            "M81",
+            "the existing target is never renamed"
+        );
+        // A third target of the same name takes the next index, and
+        // the (2) target is not renumbered by it.
+        conn.execute(
+            "INSERT INTO target (Id, name, active, ra, dec, epochcode, rotation, roi, projectid, guid)
+             VALUES (5, 'M81', 1, 9.7, 69.3, 2, 0, 100, 1, 'third-target')",
+            [],
+        )
+        .unwrap();
+        let preview = plan_organization(&conn, &move_target(5, Some(2), None))
+            .unwrap()
+            .preview;
+        assert_eq!(preview.destination_target_name, "M81 (3)");
+        // Unclear destinations are still refused.
+        bad_request(plan_organization(&conn, &move_target(1, Some(2), None)));
         bad_request(plan_organization(&conn, &move_target(1, None, None)));
         bad_request(plan_organization(
             &conn,
@@ -2424,10 +2528,6 @@ mod tests {
         ));
         bad_request(plan_organization(&conn, &move_target(1, Some(99), None)));
         bad_request(plan_organization(&conn, &move_target(99, Some(2), None)));
-        // A target with another name moves; only names collide.
-        conn.execute("UPDATE target SET name = 'M81 alias' WHERE Id = 1", [])
-            .unwrap();
-        plan_organization(&conn, &move_target(1, Some(2), None)).unwrap();
     }
 
     #[test]
@@ -2936,7 +3036,7 @@ mod http_tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn put_refuses_a_move_without_changing_anything_else() {
+    async fn put_refuses_a_profile_mismatch_but_suffixes_a_name_clash_on_move() {
         let rig = rig();
         let (status, body) = send(
             &rig.app,
@@ -2966,12 +3066,10 @@ mod http_tests {
             json!({ "project_id": 2 }),
         )
         .await;
-        assert_eq!(status, 400, "{body}");
-        assert!(
-            body["error"].as_str().unwrap().contains("Merge target"),
-            "{body}"
-        );
-        assert_eq!(index_jobs(&rig, 1), ["sii"]);
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(body["data"]["images_moved"], 1);
+        assert_eq!(target(&rig), (2, "Bubble Nebula (2)".to_string()));
+        assert_eq!(index_jobs(&rig, 2), ["sii"]);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

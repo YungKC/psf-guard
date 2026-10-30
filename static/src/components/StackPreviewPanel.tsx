@@ -22,6 +22,7 @@ import type {
   StackStretchPreview,
 } from '../api/types';
 import StackPreviewInspector from './StackPreviewInspector';
+import ManualMosaicPicker from './ManualMosaicPicker';
 import CalibrationMasterButton from './CalibrationMasterInspector';
 import StackSnrCurve from './StackSnrCurve';
 import ScoringChangedNote from './ScoringChangedNote';
@@ -348,6 +349,10 @@ export default function StackPreviewPanel({
     return next;
   });
   const [acceptedOnly, setAcceptedOnly] = useState(false);
+  // A user-defined mosaic the next mosaic build uses, or `null` for
+  // the project's default mosaic. Only the mosaic panel shows the
+  // picker; other builds are unchanged.
+  const [selectedMosaicId, setSelectedMosaicId] = useState<number | null>(null);
   // Not remembered across reloads: capture order is the free reading every
   // build produces, and quality order is a deliberate one-off question about
   // culling that should never be the state someone comes back to.
@@ -471,6 +476,7 @@ export default function StackPreviewPanel({
       const request = {
         image_ids: variables.imageIds,
         mosaic,
+        mosaic_id: mosaic && selectedMosaicId !== null ? selectedMosaicId : undefined,
         accepted_only: acceptedOnly,
         force: variables.force,
         order: frameOrder,
@@ -947,6 +953,14 @@ export default function StackPreviewPanel({
                 Register and integrate the {stableImageIds.length}{sourceText ? ` ${sourceText}` : ''} images by exact
                 target and channel. Rejected and quality-regrade frames are left out automatically.
               </p>
+            )}
+            {!collapsed && mosaic && (
+              <ManualMosaicPicker
+                dbId={dbId}
+                projectId={projectId}
+                selectedMosaicId={selectedMosaicId}
+                onSelect={setSelectedMosaicId}
+              />
             )}
           </div>
           {!collapsed && (

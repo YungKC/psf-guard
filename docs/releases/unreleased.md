@@ -16,6 +16,16 @@
 
 ## Changes
 
+- You can now define a mosaic by picking its panels. Open Stacks for a
+  project, choose **Mosaics**, pick two or more of the project's targets,
+  and name the mosaic. The mosaic is a selection, not a copy: it lists
+  the targets to integrate on one expanded canvas, sparse grids
+  included, while grading and calibration stay per panel. Deleting a
+  mosaic leaves every frame untouched. When two targets in one project
+  share a name (for example, two rigs on one field), the later one
+  shows with an index, such as `LDN 1163 Panel 1 (2)`; the object name
+  itself is unchanged.
+
 - PSF Guard's zstd library is updated for memory-safety advisories in its
   stream and context handling. PSF Guard uses zstd to read and write
   compressed XISF files and saved stacking contexts, and to decompress HTTP
